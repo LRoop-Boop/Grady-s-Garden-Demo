@@ -38,7 +38,7 @@ export async function generatePersonalizedLesson(questions: QuestionResults): Pr
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
 
     try {
         const result = await model.generateContent(buildPrompt(questions));
