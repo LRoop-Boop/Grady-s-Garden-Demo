@@ -23,8 +23,8 @@ function buildPrompt(questions: QuestionResults): string {
     return [
         "You are creating a short, encouraging personalized lesson for a young child",
         "learning about fruits and vegetables, based on their quiz results below.",
-        "Focus on the questions they got wrong, gently correct any misconceptions,",
-        "and keep it under 150 words in simple, friendly language.",
+        "Focus on the questions they got wrong, gently correct any misconceptions, ask a new question to reinforce learning,",
+        "and keep it under 70 words in simple, friendly language. dont use * character or hearts unless necessary but food icons are lightly encouraged ",
         "",
         "Quiz results:",
         ...lines,
@@ -39,7 +39,7 @@ export async function generatePersonalizedLesson(questions: QuestionResults): Pr
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
 
     try {
         const result = await model.generateContent(buildPrompt(questions));
