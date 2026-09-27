@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Secrets — real values live only in your local .env. Copy .env.example
+# and share actual keys with teammates privately, never in git.
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

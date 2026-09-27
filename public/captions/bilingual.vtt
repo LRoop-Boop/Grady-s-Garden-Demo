@@ -1,0 +1,181 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:05.440
+Whether you're localizing for global audiences or just playing around with multi-language content,
+<i>Ya sea que estés localizando para audiencias globales o simplemente jugando con contenido en varios idiomas,</i>
+
+00:00:05.440 --> 00:00:10.560
+FFMPEG makes it super seamless to swap or add an audio track to your video.
+<i>FFMPEG hace que sea súper sencillo intercambiar o agregar una pista de audio a tu video.</i>
+
+00:00:10.560 --> 00:00:16.560
+In this quick guide, I'll show you how to add a foreign language audio track to your videos,
+<i>En esta guía rápida, te mostraré cómo agregar una pista de audio en idioma extranjero a tus videos,</i>
+
+00:00:16.560 --> 00:00:21.200
+using only command line and no video editor required. Let's get into it.
+<i>usando solo la línea de comandos y sin necesidad de un editor de video. Vamos a ello.</i>
+
+00:00:21.200 --> 00:00:26.640
+We're going to have a couple of use cases here, but the first one is going to completely replace
+<i>Vamos a tener un par de casos de uso aquí, pero el primero será reemplazar completamente</i>
+
+00:00:26.640 --> 00:00:31.920
+the English with the French. So I have our terminal loaded up here, as well as our two files here,
+<i>el inglés con el francés. Así que tengo nuestra terminal cargada aquí, así como nuestros dos archivos aquí,</i>
+
+00:00:31.920 --> 00:00:38.000
+so our first one is going to be the original video file. As you hear, it's in English,
+<i>nuestro primer archivo será el archivo de video original. Como escuchas, está en inglés,</i>
+
+00:00:38.000 --> 00:00:47.840
+perfect, another tutorial. And then we're going to take a look at the French dub diversion,
+<i>perfecto, otro tutorial. Y luego vamos a echar un vistazo a la versión doblada al francés,</i>
+
+00:00:47.840 --> 00:00:49.120
+or translated version here.
+<i>o versión traducida aquí.</i>
+
+00:00:55.600 --> 00:01:02.480
+Great. First things first is FFMPEG, and then I stands for input, so we're going to do our first
+<i>Genial. Lo primero es lo primero: FFMPEG, y luego -i significa entrada, así que haremos nuestra primera</i>
+
+00:01:02.480 --> 00:01:11.440
+input, which is video.mp4, and then we're going to do our second input of French.m4A.
+<i>entrada, que es video.mp4, y luego haremos nuestra segunda entrada de French.m4A.</i>
+
+00:01:11.440 --> 00:01:18.560
+Next thing is going to be -c colon v, so c stands for codec and v stands for video. That's how we
+<i>Lo siguiente será -c :v, donde c significa códec y v significa video. Así es como</i>
+
+00:01:18.560 --> 00:01:23.520
+selected the video codec, and we're going to stream copy that, because we don't need to encode it.
+<i>seleccionamos el códec de video, y vamos a copiar el flujo, porque no necesitamos codificarlo.</i>
+
+00:01:23.520 --> 00:01:27.840
+Next thing we're going to map both the streams into the locations that we want,
+<i>Lo siguiente es mapear ambos flujos a las ubicaciones que queremos,</i>
+
+00:01:27.840 --> 00:01:32.560
+so first thing is going to be the video stream, so we're just going to take the stream index zero,
+<i>así que lo primero será el flujo de video, por lo que simplemente tomaremos el índice de flujo cero,</i>
+
+00:01:32.560 --> 00:01:38.720
+which is video.mp4. We're going to take the video stream of that v, and the destination index is
+<i>que es video.mp4. Tomaremos el flujo de video de ese v, y el índice de destino también</i>
+
+00:01:38.720 --> 00:01:47.440
+going to also be zero. So the first stream, right? Our second map parameter here is going to be
+<i>será cero. Así que el primer flujo, ¿verdad? Nuestro segundo parámetro de mapa aquí será</i>
+
+00:01:48.160 --> 00:01:56.720
+one, which is the one is index one of inputs, which is French.m4A, the audio of that, there's only audio,
+<i>uno, que es el índice uno de las entradas, que es French.m4A, el audio de eso, solo hay audio,</i>
+
+00:01:56.720 --> 00:02:03.280
+and then we're going to have that be in the index zero, destination. So going along to this,
+<i>y luego haremos que esté en el destino del índice cero. Entonces, siguiendo con esto,</i>
+
+00:02:03.280 --> 00:02:11.600
+and for the audio, we are just going to also stream copy. So if we wanted to, I could have just done
+<i>y para el audio, también vamos a simplemente copiar el flujo. Entonces, si quisiéramos, podría haber hecho simplemente</i>
+
+00:02:11.600 --> 00:02:19.360
+-c and just copy, but for learning purposes, it's a little easier this way. Replace time
+<i>-c y copy, pero para fines de aprendizaje, es un poco más fácil de esta manera. Replace time</i>
+
+00:02:19.360 --> 00:02:24.000
+p4. That's going to be our output command, right? We're going to run it and hit enter.
+<i>p4. Ese será nuestro comando de salida, ¿verdad? Vamos a ejecutarlo y presionar enter.</i>
+
+00:02:24.000 --> 00:02:29.120
+All right, let's see here. Done. Let's take a listen.
+<i>Muy bien, veamos aquí. Listo. Escuchemos.</i>
+
+00:02:29.120 --> 00:02:33.680
+Darius, tu as parles plutôt cette semaine de la façon dont no lecteur e-frame,
+<i>Darius, tu as parles plutôt cette semaine de la façon dont no lecteur e-frame,</i>
+
+00:02:33.680 --> 00:02:36.480
+et web, perfect. And if we wanted to see that it was just one,
+<i>y web, perfecto. Y si quisiéramos ver que solo había uno,</i>
+
+00:02:38.160 --> 00:02:43.920
+one audio stream, you can see here there's just one. This is the video here, and then the audio
+<i>un flujo de audio, puedes ver aquí que solo hay uno. Este es el video aquí, y luego el audio</i>
+
+00:02:43.920 --> 00:02:50.000
+here as well. That's the first use case, which is just replacing the original audio track.
+<i>aquí también. Ese es el primer caso de uso, que es simplemente reemplazar la pista de audio original.</i>
+
+00:02:50.000 --> 00:02:56.800
+Now we're on to use case two, which is just to add an additional audio track and embed that
+<i>Ahora pasamos al caso de uso dos, que es simplemente agregar una pista de audio adicional e incrustarla</i>
+
+00:02:56.800 --> 00:03:05.520
+in the mp4. So we have a replace one here, but again, same two assets here, and we are going to
+<i>en el mp4. Entonces tenemos un reemplazo aquí, pero nuevamente, los mismos dos activos aquí, y vamos a</i>
+
+00:03:05.520 --> 00:03:14.880
+do something very similar. So if ffmpeg, of course, video, mp4 is our first, and then french.m4a,
+<i>hacer algo muy similar. Entonces ffmpeg, por supuesto, video.mp4 es nuestro primero, y luego french.m4a,</i>
+
+00:03:14.880 --> 00:03:20.480
+and then we are going to map both of the audio streams as well as the video stream here. Zero,
+<i>y luego vamos a mapear ambos flujos de audio así como el flujo de video aquí. Cero,</i>
+
+00:03:20.480 --> 00:03:25.840
+colon v is just selecting all video streams or the video stream, and then we're going to map
+<i>:v es simplemente seleccionar todos los flujos de video o el flujo de video, y luego vamos a mapear</i>
+
+00:03:25.840 --> 00:03:33.040
+audio streams on the first input, and then we're going to map all audio streams on the second input.
+<i>los flujos de audio en la primera entrada, y luego vamos a mapear todos los flujos de audio en la segunda entrada.</i>
+
+00:03:33.040 --> 00:03:40.240
+And then in this case, we are just going to stream copy both or all. And we're going to call this
+<i>Y luego, en este caso, simplemente vamos a copiar el flujo de ambos o de todos. Y vamos a llamar a esto</i>
+
+00:03:40.240 --> 00:03:46.960
+multi-lang. All right, so first input, second input, we're selecting the video stream,
+<i>multi-lang. Muy bien, así que primera entrada, segunda entrada, estamos seleccionando el flujo de video,</i>
+
+00:03:46.960 --> 00:03:51.200
+selecting the audio stream on the first input, selecting the audio stream on the second input,
+<i>seleccionando el flujo de audio en la primera entrada, seleccionando el flujo de audio en la segunda entrada,</i>
+
+00:03:51.200 --> 00:03:54.880
+and we're going to copy all of them together. Okay, we're going to run it.
+<i>y vamos a copiarlos todos juntos. Bien, vamos a ejecutarlo.</i>
+
+00:03:57.200 --> 00:04:04.720
+Um, when we play it, it will likely, yeah, you won't be able to, it will kind of merge them both
+<i>Um, cuando lo reproduzcamos, probablemente, sí, no podrás, los fusionará ambos</i>
+
+00:04:04.720 --> 00:04:16.560
+together, but for this purpose, if we wanted to probe it, and see, you see, you have both. So in
+<i>juntos, pero para este propósito, si quisiéramos sondearlo, y ver, verás, tienes ambos. Entonces en</i>
+
+00:04:16.560 --> 00:04:23.360
+some players, they might play them together like quick time here, but these have both embedded here.
+<i>algunos reproductores, pueden reproducirlos juntos como QuickTime aquí, pero estos tienen ambos incrustados aquí.</i>
+
+00:04:23.360 --> 00:04:27.760
+Now, let's say, let's see if we wanted to use something like VLC and play it.
+<i>Ahora, digamos, veamos si quisiéramos usar algo como VLC y reproducirlo.</i>
+
+00:04:27.760 --> 00:04:36.240
+Right, you can just hear the English. Perfect. But if I wanted to select a different audio track,
+<i>Correcto, puedes simplemente escuchar el inglés. Perfecto. Pero si quisiera seleccionar una pista de audio diferente,</i>
+
+00:04:36.240 --> 00:04:45.360
+hit two, and we hear the French. And that's use case two. And that's how you add foreign language
+<i>presiona dos, y escuchamos el francés. Y ese es el caso de uso dos. Y así es como agregas pistas de audio</i>
+
+00:04:45.360 --> 00:04:51.360
+audio tracks to your videos. Great for localization, accessibility, AI workflows, or just giving your
+<i>en idiomas extranjeros a tus videos. Genial para localización, accesibilidad, flujos de trabajo de IA o simplemente para dar a tu</i>
+
+00:04:51.360 --> 00:04:55.120
+content a broader reach.
+<i>contenido un alcance más amplio.</i>

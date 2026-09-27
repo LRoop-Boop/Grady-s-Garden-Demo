@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { translateTexts, type LanguageCode } from "../lib/translate";
+import MuxLessonVideo from "../components/MuxLessonVideo";
+import { translateTexts, translateToEnglish, type LanguageCode } from "../lib/translate";
 
 // --- Mock content model -----------------------------------------------
 // This is a throwaway data set for the demo. Swap `emoji` for real
@@ -27,12 +28,13 @@ interface QuizSlide {
   accent: string;
 }
 
+// The video itself is chosen server-side (MUX_PLAYBACK_ID), since playback
+// needs a token signed by the server anyway — see MuxLessonVideo.
 interface VideoSlide {
   kind: "video";
   id: string;
   emoji: string;
   title: string;
-  videoId: string; // YouTube video ID (the part after v= in the URL)
   accent: string;
 }
 
@@ -114,7 +116,6 @@ const slides: Slide[] = [
     id: "bonus-video",
     emoji: "🎬",
     title: "Watch and Learn!",
-    videoId: "TVWHX6EPUVI",
     accent: "from-indigo-100 to-purple-50",
   },
   {
@@ -139,7 +140,8 @@ const languages: { code: LanguageCode; label: string; flag: string }[] = [
 // change, so they're translated once by hand instead of burning API calls
 // on them every time the language switches.
 const uiText: Record<LanguageCode, Record<
-  "moduleTest" | "back" | "next" | "slide" | "of" | "answered" | "scored" | "changeAnswer" | "notQuite",
+  | "moduleTest" | "back" | "next" | "slide" | "of" | "answered" | "scored" | "changeAnswer" | "notQuite"
+  | "readAloud" | "stopReading" | "checkTranslation" | "roundTrip" | "checkingTranslation" | "checkFailed",
   string
 >> = {
   en: {
@@ -152,6 +154,12 @@ const uiText: Record<LanguageCode, Record<
     scored: "You scored",
     changeAnswer: "Changed your mind? Tap another answer.",
     notQuite: "Not quite —",
+    readAloud: "Read aloud",
+    stopReading: "Stop",
+    checkTranslation: "Check translation",
+    roundTrip: "Round-trip",
+    checkingTranslation: "Checking translation…",
+    checkFailed: "Couldn't check",
   },
   es: {
     moduleTest: "Prueba del módulo",
@@ -163,6 +171,12 @@ const uiText: Record<LanguageCode, Record<
     scored: "Obtuviste",
     changeAnswer: "¿Cambiaste de opinión? Toca otra respuesta.",
     notQuite: "No es correcto —",
+    readAloud: "Leer en voz alta",
+    stopReading: "Detener",
+    checkTranslation: "Verificar traducción",
+    roundTrip: "Traducción inversa",
+    checkingTranslation: "Verificando traducción…",
+    checkFailed: "No se pudo verificar",
   },
   fr: {
     moduleTest: "Test du module",
@@ -174,6 +188,12 @@ const uiText: Record<LanguageCode, Record<
     scored: "Vous avez obtenu",
     changeAnswer: "Vous avez changé d'avis ? Touchez une autre réponse.",
     notQuite: "Pas tout à fait —",
+    readAloud: "Lire à voix haute",
+    stopReading: "Arrêter",
+    checkTranslation: "Vérifier la traduction",
+    roundTrip: "Traduction inverse",
+    checkingTranslation: "Vérification de la traduction…",
+    checkFailed: "Échec de la vérification",
   },
 };
 
@@ -201,6 +221,31 @@ function getTranslatableStrings(slide: Slide): string[] {
     return [slide.title];
   }
   return [slide.title, slide.body];
+}
+
+// A single speakable sentence for the read-aloud button — same fields as
+// getTranslatableStrings, just joined for natural pauses instead of kept
+// as an array.
+function getSpeakableText(slide: Slide): string {
+  if (slide.kind === "quiz") {
+    return [slide.question, ...slide.options].join(". ");
+  }
+  if (slide.kind === "video") {
+    return slide.title;
+  }
+  return [slide.title, slide.body].join(". ");
+}
+
+// A compact one-line summary of a slide's main text, used to display the
+// round-trip (translate-back-to-English) result in the translation-check panel.
+function getSummaryText(slide: Slide): string {
+  if (slide.kind === "quiz") {
+    return [slide.question, ...slide.options].join(" · ");
+  }
+  if (slide.kind === "video") {
+    return slide.title;
+  }
+  return `${slide.title} — ${slide.body}`;
 }
 
 function withTranslatedStrings(slide: Slide, translated: string[]): Slide {
@@ -231,6 +276,18 @@ export default function Translation() {
   const [translationStatus, setTranslationStatus] = useState<"idle" | "loading" | "error">("idle");
   const [translationError, setTranslationError] = useState<string | null>(null);
 
+  // Round-trip translation check (translate back to English, compare to the
+  // original) — an opt-in QA aid, not something shown to the end learner by
+  // default. Cached the same way as the forward translation.
+  const [showTranslationCheck, setShowTranslationCheck] = useState(false);
+  const [backTranslationCache, setBackTranslationCache] = useState<Record<string, string[]>>({});
+  const [backTranslationStatus, setBackTranslationStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [backTranslationError, setBackTranslationError] = useState<string | null>(null);
+
+  // Read-aloud, via the browser's built-in speech synthesis — no API, no key.
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
+
   const slide = slides[index];
   const isFirst = index === 0;
   const isLast = index === slides.length - 1;
@@ -242,6 +299,9 @@ export default function Translation() {
       ? slide
       : withTranslatedStrings(slide, translationCache[cacheKey]);
   const isShowingTranslation = language !== "en" && Boolean(translationCache[cacheKey]);
+  const roundTripSlide = backTranslationCache[cacheKey]
+    ? withTranslatedStrings(slide, backTranslationCache[cacheKey])
+    : null;
 
   const score = quizSlides.reduce((total, q) => {
     return answers[q.id] === q.correctIndex ? total + 1 : total;
@@ -281,8 +341,63 @@ export default function Translation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-runs on slide/language; cache is read, not a trigger
   }, [slide, language, cacheKey]);
 
+  // Round-trip translation check — only runs when the toggle is on, and
+  // only once the forward translation it depends on has actually landed.
+  useEffect(() => {
+    if (!showTranslationCheck || language === "en") return;
+    const translated = translationCache[cacheKey];
+    if (!translated || backTranslationCache[cacheKey]) return;
+
+    let cancelled = false;
+    setBackTranslationStatus("loading");
+    setBackTranslationError(null);
+
+    translateToEnglish(translated, language)
+      .then((roundTrip) => {
+        if (cancelled) return;
+        setBackTranslationCache((prev) => ({ ...prev, [cacheKey]: roundTrip }));
+        setBackTranslationStatus("idle");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setBackTranslationStatus("error");
+        setBackTranslationError(error instanceof Error ? error.message : "Round-trip check failed.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cacheKey captures slide+language; caches are read, not triggers
+  }, [showTranslationCheck, language, cacheKey, translationCache]);
+
+  // Stop any in-progress narration whenever the slide or language changes,
+  // rather than letting it keep reading over a slide the user has left.
+  useEffect(() => {
+    window.speechSynthesis?.cancel();
+    setIsSpeaking(false);
+  }, [index, language]);
+
   function goTo(nextIndex: number) {
     setIndex(Math.max(0, Math.min(slides.length - 1, nextIndex)));
+  }
+
+  function speakCurrentSlide() {
+    if (!speechSupported) return;
+    const text = getSpeakableText(displaySlide);
+    if (!text.trim()) return;
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = localeForLanguage[language];
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    setIsSpeaking(true);
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function stopSpeaking() {
+    window.speechSynthesis?.cancel();
+    setIsSpeaking(false);
   }
 
   function selectAnswer(slideId: string, optionIndex: number) {
@@ -363,6 +478,16 @@ export default function Translation() {
         >
           <div className="text-6xl">{displaySlide.emoji}</div>
 
+          {speechSupported && (
+            <button
+              type="button"
+              onClick={() => (isSpeaking ? stopSpeaking() : speakCurrentSlide())}
+              className="flex items-center gap-1.5 rounded-full border-2 border-teal-700/40 bg-white/70 px-3 py-1 text-sm font-semibold text-teal-800 transition hover:bg-white"
+            >
+              {isSpeaking ? `⏹ ${t.stopReading}` : `🔊 ${t.readAloud}`}
+            </button>
+          )}
+
           {displaySlide.kind === "quiz" && (
             <QuizSlideView
               slide={displaySlide}
@@ -374,7 +499,7 @@ export default function Translation() {
           )}
 
           {displaySlide.kind === "video" && (
-            <VideoSlideView slide={displaySlide} language={language} />
+            <MuxLessonVideo title={displaySlide.title} language={language} />
           )}
 
           {displaySlide.kind !== "quiz" && displaySlide.kind !== "video" && (
@@ -390,7 +515,31 @@ export default function Translation() {
           )}
 
           {isShowingTranslation && (
-            <p className="text-xs text-teal-900/50">Translated automatically — wording may be rough.</p>
+            <div className="flex flex-col items-center gap-1.5">
+              <p className="text-xs text-teal-900/50">Translated automatically — wording may be rough.</p>
+              <button
+                type="button"
+                onClick={() => setShowTranslationCheck((prev) => !prev)}
+                className="text-xs font-semibold text-teal-700 underline decoration-dotted underline-offset-2 hover:text-teal-900"
+              >
+                {t.checkTranslation}
+              </button>
+              {showTranslationCheck && (
+                <div className="w-full rounded-xl bg-white/60 px-3 py-2 text-xs text-teal-900/80">
+                  {backTranslationStatus === "loading" && <p>{t.checkingTranslation}</p>}
+                  {backTranslationStatus === "error" && (
+                    <p className="text-rose-600">
+                      {t.checkFailed} ({backTranslationError}).
+                    </p>
+                  )}
+                  {roundTripSlide && (
+                    <p>
+                      <span className="font-semibold">{t.roundTrip}:</span> {getSummaryText(roundTripSlide)}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -445,42 +594,6 @@ function VeggieFooter() {
         ))}
       </div>
     </footer>
-  );
-}
-
-// Embeds a YouTube video with its original audio track untouched. Captions
-// are YouTube's own (creator-uploaded or auto-generated) — `cc_load_policy=1`
-// turns them on, and `cc_lang_pref` requests the language matching whatever
-// is selected above. That request only succeeds if the video actually has a
-// caption track in that language; there's no reliable way to confirm that
-// from the plain embed API, so this doesn't try to detect or warn about it.
-// Remounting the iframe (via `key`) on language change is the only way to
-// get YouTube to re-apply `cc_lang_pref` — it isn't a live, hot-swappable
-// player setting, so switching languages restarts the video.
-function VideoSlideView({
-  slide,
-  language,
-}: Readonly<{ slide: VideoSlide; language: LanguageCode }>) {
-  const src = `https://www.youtube-nocookie.com/embed/${slide.videoId}?cc_load_policy=1&cc_lang_pref=${language}&hl=${language}&rel=0`;
-
-  return (
-    <div className="flex w-full max-w-xl flex-col items-center gap-2">
-      <h1 className="text-2xl font-bold text-teal-900">{slide.title}</h1>
-      <div className="aspect-video w-full overflow-hidden rounded-2xl shadow-md">
-        <iframe
-          key={language}
-          src={src}
-          title={slide.title}
-          className="h-full w-full"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-        />
-      </div>
-      <p className="text-xs text-teal-900/60">
-        Captions come from YouTube and depend on what's available for this video in the
-        selected language.
-      </p>
-    </div>
   );
 }
 
