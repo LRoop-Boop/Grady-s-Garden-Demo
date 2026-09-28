@@ -1,23 +1,47 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   searchCurriculum,
+  getFactOfTheDay,
   CurriculumSearchError,
   type CurriculumSearchResult,
+  type FactOfTheDay,
 } from "../lib/gemini";
+import {
+  translateTexts,
+  TranslationError,
+  type LanguageCode,
+} from "../lib/translate";
 
 import {
-  FACTS_OF_THE_DAY,
   FLAGS_STORAGE_KEY,
   makeTemplateSlide,
-  matchCurriculumSection,
   slideFromSearchResult,
-  todaysFactIndex,
   type FlaggedTopic,
   type LessonSlide,
   type RequestStatus,
 } from "../components/copilotData";
 import DeckWorkspace from "../components/DeckWorkspace";
 import Sidebar, { FlagToggleButton } from "../components/Flagsidebar";
+
+// --- Static UI strings ---------------------------------------------------
+// Centralized so the translation toggle can batch-translate them in one shot
+// instead of scattering translateTexts calls through the JSX.
+
+const UI_STRINGS = {
+  pageEyebrow: "Grady's Garden · Veggie Adventure",
+  pageTitle: "Parent/Teacher Copilot",
+  searchPlaceholder: "Search: e.g. Can carrots be purple?",
+  searchButtonIdle: "Look Up",
+  searchButtonLoading: "Looking up...",
+  searchHelper:
+    "Answers come from the Grady's Garden curriculum when available; otherwise they're labeled AI-generated.",
+  loadingCurriculum: "Checking the curriculum...",
+  addToSlide: "+ Add to Slide",
+  lastGeneratedLabel: "Last generated slide:",
+  foundInLabel: "Found in:",
+  fromCurriculumBadge: "📚 From curriculum (Firestore)",
+  aiGeneratedBadge: "✨ AI-generated",
+} as const;
 
 export default function Copilot() {
   // --- Saved topics ----------------------------------------------------
@@ -57,20 +81,47 @@ export default function Copilot() {
     }
   }
 
-  // --- Fact of the day -------------------------------------------------
+  // --- Fact of the day (now RAG-backed) --------------------------------
 
-  const [factIndex, setFactIndex] = useState(todaysFactIndex);
+  const [fact, setFact] = useState<FactOfTheDay | null>(null);
+  const [factStatus, setFactStatus] = useState<RequestStatus>("idle");
+  const [factError, setFactError] = useState<string | null>(null);
 
-  function refreshFact() {
-    if (FACTS_OF_THE_DAY.length <= 1) return;
+  useEffect(() => {
+    loadDailyFact();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    let next = Math.floor(Math.random() * FACTS_OF_THE_DAY.length);
-
-    while (next === factIndex) {
-      next = Math.floor(Math.random() * FACTS_OF_THE_DAY.length);
+  async function loadDailyFact() {
+    setFactStatus("loading");
+    setFactError(null);
+    try {
+      setFact(await getFactOfTheDay("daily"));
+      setFactStatus("idle");
+    } catch (err) {
+      setFactStatus("error");
+      setFactError(
+        err instanceof CurriculumSearchError
+          ? err.message
+          : "Couldn't load today's fact."
+      );
     }
+  }
 
-    setFactIndex(next);
+  async function refreshFact() {
+    setFactStatus("loading");
+    setFactError(null);
+    try {
+      setFact(await getFactOfTheDay("random", fact?.source));
+      setFactStatus("idle");
+    } catch (err) {
+      setFactStatus("error");
+      setFactError(
+        err instanceof CurriculumSearchError
+          ? err.message
+          : "Couldn't load a new fact."
+      );
+    }
   }
 
   // --- Slide deck ------------------------------------------------------
@@ -102,10 +153,12 @@ export default function Copilot() {
   }
 
   function addFactSlide() {
+    if (!fact) return;
+
     addSlide({
       id: crypto.randomUUID(),
       title: "Fact of the Day",
-      points: [FACTS_OF_THE_DAY[factIndex]],
+      points: [fact.text],
       layout: "bullets",
       imageUrl: "",
       accent: "from-green-100 to-lime-50",
@@ -115,7 +168,6 @@ export default function Copilot() {
   // --- Smart curriculum lookup ----------------------------------------
 
   const [query, setQuery] = useState("");
-  const [matchedSection, setMatchedSection] = useState<string | null>(null);
   const [result, setResult] = useState<CurriculumSearchResult | null>(null);
   const [searchStatus, setSearchStatus] = useState<RequestStatus>("idle");
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -123,7 +175,6 @@ export default function Copilot() {
   async function runSearch() {
     if (!query.trim()) return;
 
-    setMatchedSection(matchCurriculumSection(query.trim()));
     setSearchStatus("loading");
     setSearchError(null);
 
@@ -141,6 +192,8 @@ export default function Copilot() {
 
   const [generateStatus, setGenerateStatus] = useState<RequestStatus>("idle");
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [lastGenerated, setLastGenerated] =
+    useState<CurriculumSearchResult | null>(null);
 
   async function generateSlideFromTopic(topic: string): Promise<boolean> {
     if (!topic.trim()) return false;
@@ -151,6 +204,7 @@ export default function Copilot() {
     try {
       const found = await searchCurriculum(topic.trim());
       addSlide(slideFromSearchResult(found, "from-purple-100 to-indigo-50"));
+      setLastGenerated(found);
       setGenerateStatus("idle");
       return true;
     } catch (err) {
@@ -162,16 +216,98 @@ export default function Copilot() {
 
   const activeSlide = slides.find((slide) => slide.id === activeSlideId) ?? null;
 
+  // --- Translation -------------------------------------------------------
+  // Single toggle (EN <-> ES) using the translate.ts provider. Translated
+  // strings are cached by their English source so repeat toggles don't
+  // re-hit MyMemory. Covers the static UI copy plus the RAG-driven content
+  // (fact of the day, search result panel). Slide text rendered inside
+  // DeckWorkspace isn't translated here since that component's source
+  // wasn't part of this pass — it'd need its own translate() calls to
+  // pick up the cache.
+
+  const [language, setLanguage] = useState<LanguageCode>("en");
+  const [translationCache, setTranslationCache] = useState<Record<string, string>>({});
+  const [translating, setTranslating] = useState(false);
+  const [translationError, setTranslationError] = useState<string | null>(null);
+
+  function translate(text: string): string {
+    if (language === "en" || !text) return text;
+    return translationCache[text] ?? text;
+  }
+
+  async function ensureTranslated(texts: string[]) {
+    if (language === "en") return;
+
+    const missing = Array.from(
+      new Set(texts.filter((t) => t.trim() && !(t in translationCache)))
+    );
+    if (missing.length === 0) return;
+
+    setTranslating(true);
+    setTranslationError(null);
+
+    try {
+      const translated = await translateTexts(missing, language);
+      setTranslationCache((prev) => {
+        const next = { ...prev };
+        missing.forEach((original, i) => {
+          next[original] = translated[i];
+        });
+        return next;
+      });
+    } catch (err) {
+      setTranslationError(
+        err instanceof TranslationError ? err.message : "Translation failed."
+      );
+    } finally {
+      setTranslating(false);
+    }
+  }
+
+  useEffect(() => {
+    if (language === "en") return;
+
+    const texts: string[] = [...Object.values(UI_STRINGS)];
+
+    if (fact) texts.push(fact.text);
+    if (result) {
+      texts.push(result.title, result.teacherSummary, ...result.studentBullets);
+    }
+
+    ensureTranslated(texts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language, fact, result]);
+
+  function toggleLanguage() {
+    setLanguage((prev) => (prev === "en" ? "es" : "en"));
+  }
+
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-gradient-to-b from-teal-50 to-white">
       <header className="flex items-center justify-between bg-teal-800 px-6 py-4 text-white shadow-md">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-teal-200">
-            Grady's Garden · Veggie Adventure
+            {translate(UI_STRINGS.pageEyebrow)}
           </p>
           <h1 className="text-xl font-bold sm:text-2xl">
-            Parent/Teacher Copilot
+            {translate(UI_STRINGS.pageTitle)}
           </h1>
+        </div>
+
+        <div className="flex flex-col items-end gap-1">
+          <button
+            type="button"
+            onClick={toggleLanguage}
+            disabled={translating}
+            className="rounded-full border-2 border-white/30 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {translating ? "…" : language === "en" ? "ES" : "EN"}
+          </button>
+          {translationError && (
+            <span className="max-w-[10rem] text-right text-[10px] text-rose-200">
+              {translationError}
+            </span>
+          )}
         </div>
       </header>
 
@@ -181,11 +317,11 @@ export default function Copilot() {
           onQueryChange={setQuery}
           onSearch={runSearch}
           status={searchStatus}
+          translate={translate}
         />
 
         {(result || searchStatus === "loading" || searchStatus === "error") && (
           <LookupResultPanel
-            matchedSection={matchedSection}
             result={result}
             status={searchStatus}
             error={searchError}
@@ -200,12 +336,26 @@ export default function Copilot() {
             }}
             onDismiss={() => {
               setResult(null);
-              setMatchedSection(null);
               setSearchStatus("idle");
             }}
+            translate={translate}
           />
         )}
       </div>
+
+      {lastGenerated && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-teal-700/10 bg-white px-6 py-2 text-xs text-teal-900/70">
+          <span>{translate(UI_STRINGS.lastGeneratedLabel)}</span>
+          <SourceBadge source={lastGenerated.source} translate={translate} />
+          {lastGenerated.source === "curriculum" &&
+            lastGenerated.sourceTitles.length > 0 && (
+              <span>
+                {translate(UI_STRINGS.foundInLabel)}{" "}
+                {lastGenerated.sourceTitles.join(" · ")}
+              </span>
+            )}
+        </div>
+      )}
 
       <main className="flex min-h-0 flex-col lg:flex-row">
         <DeckWorkspace
@@ -223,7 +373,15 @@ export default function Copilot() {
         />
 
         <Sidebar
-          fact={FACTS_OF_THE_DAY[factIndex]}
+          fact={
+            factStatus === "loading"
+              ? "Loading today's fact…"
+              : factStatus === "error"
+              ? factError ?? "Couldn't load a fact right now."
+              : fact
+              ? translate(fact.text)
+              : ""
+          }
           onRefreshFact={refreshFact}
           onAddFactToSlide={addFactSlide}
           flags={flags}
@@ -248,6 +406,32 @@ function errorMessage(err: unknown) {
     : "Something went wrong.";
 }
 
+// --- Source badge ------------------------------------------------------
+
+function SourceBadge({
+  source,
+  translate,
+}: Readonly<{
+  source: CurriculumSearchResult["source"];
+  translate: (text: string) => string;
+}>) {
+  const fromCurriculum = source === "curriculum";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
+        fromCurriculum
+          ? "bg-emerald-100 text-emerald-800"
+          : "bg-amber-100 text-amber-800"
+      }`}
+    >
+      {fromCurriculum
+        ? translate(UI_STRINGS.fromCurriculumBadge)
+        : translate(UI_STRINGS.aiGeneratedBadge)}
+    </span>
+  );
+}
+
 // --- Smart search bar --------------------------------------------------
 
 function SmartSearchBar({
@@ -255,11 +439,13 @@ function SmartSearchBar({
   onQueryChange,
   onSearch,
   status,
+  translate,
 }: Readonly<{
   query: string;
   onQueryChange: (value: string) => void;
   onSearch: () => void;
   status: RequestStatus;
+  translate: (text: string) => string;
 }>) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -273,7 +459,7 @@ function SmartSearchBar({
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && onSearch()}
-            placeholder="Search: e.g. Can carrots be purple?"
+            placeholder={translate(UI_STRINGS.searchPlaceholder)}
             className="w-full rounded-full border-2 border-teal-700/20 bg-teal-50/60 py-2.5 pl-9 pr-3 text-sm text-teal-900 placeholder:text-teal-900/40 focus:border-teal-600 focus:outline-none"
           />
         </div>
@@ -284,12 +470,14 @@ function SmartSearchBar({
           disabled={status === "loading" || !query.trim()}
           className="shrink-0 rounded-full border-2 border-teal-700 bg-teal-700 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {status === "loading" ? "Looking up..." : "Look Up"}
+          {status === "loading"
+            ? translate(UI_STRINGS.searchButtonLoading)
+            : translate(UI_STRINGS.searchButtonIdle)}
         </button>
       </div>
 
       <p className="pl-1 text-xs text-teal-900/50">
-        Checked against the Grady's Garden curriculum.
+        {translate(UI_STRINGS.searchHelper)}
       </p>
     </div>
   );
@@ -298,7 +486,6 @@ function SmartSearchBar({
 // --- Curriculum result -------------------------------------------------
 
 function LookupResultPanel({
-  matchedSection,
   result,
   status,
   error,
@@ -306,8 +493,8 @@ function LookupResultPanel({
   onToggleFlag,
   onAddToSlide,
   onDismiss,
+  translate,
 }: Readonly<{
-  matchedSection: string | null;
   result: CurriculumSearchResult | null;
   status: RequestStatus;
   error: string | null;
@@ -315,21 +502,30 @@ function LookupResultPanel({
   onToggleFlag: () => void;
   onAddToSlide: () => void;
   onDismiss: () => void;
+  translate: (text: string) => string;
 }>) {
   return (
     <div className="mt-3 rounded-2xl border-2 border-teal-700/15 bg-white p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
-        {matchedSection && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2.5 py-1 text-xs font-semibold text-teal-800">
-            📖 Found in: {matchedSection}
-          </span>
+        {result && status !== "loading" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <SourceBadge source={result.source} translate={translate} />
+
+            {result.source === "curriculum" &&
+              result.sourceTitles.length > 0 && (
+                <span className="text-xs text-teal-800/70">
+                  {translate(UI_STRINGS.foundInLabel)}{" "}
+                  {result.sourceTitles.join(" · ")}
+                </span>
+              )}
+          </div>
         )}
 
         <button
           type="button"
           onClick={onDismiss}
           aria-label="Dismiss"
-          className="shrink-0 rounded-full px-2 py-0.5 text-teal-700/60 hover:bg-teal-50"
+          className="ml-auto shrink-0 rounded-full px-2 py-0.5 text-teal-700/60 hover:bg-teal-50"
         >
           ✕
         </button>
@@ -337,7 +533,7 @@ function LookupResultPanel({
 
       {status === "loading" && (
         <p className="mt-2 text-sm text-teal-800/70">
-          Pulling the answer from that section...
+          {translate(UI_STRINGS.loadingCurriculum)}
         </p>
       )}
 
@@ -348,7 +544,9 @@ function LookupResultPanel({
       {result && status !== "loading" && (
         <div className="mt-2 flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-teal-900">{result.title}</span>
+            <span className="font-bold text-teal-900">
+              {translate(result.title)}
+            </span>
 
             <FlagToggleButton
               flagged={isFlagged}
@@ -357,12 +555,14 @@ function LookupResultPanel({
             />
           </div>
 
-          <p className="text-sm text-teal-800">{result.teacherSummary}</p>
+          <p className="text-sm text-teal-800">
+            {translate(result.teacherSummary)}
+          </p>
 
           {result.studentBullets.length > 0 && (
             <ul className="list-disc rounded-xl bg-teal-50/60 py-2 pl-8 pr-3 text-sm text-teal-900">
               {result.studentBullets.map((bullet, index) => (
-                <li key={index}>{bullet}</li>
+                <li key={index}>{translate(bullet)}</li>
               ))}
             </ul>
           )}
@@ -372,7 +572,7 @@ function LookupResultPanel({
             onClick={onAddToSlide}
             className="self-start rounded-xl border-2 border-teal-700 px-3 py-1.5 text-xs font-bold text-teal-700 transition hover:bg-teal-50"
           >
-            + Add to Slide
+            {translate(UI_STRINGS.addToSlide)}
           </button>
         </div>
       )}
