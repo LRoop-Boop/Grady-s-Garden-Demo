@@ -6,6 +6,7 @@ export default function Home() {
       <NavButton label="Translation" to="/translation" />
       <NavButton label="Copilot" to="/copilot" />
       <NavButton label="Personalized Lessons" to="/lessons" />
+      <NavButton label="Student Dashboard" to="/dashboard" />
     </div>
   );
 }
