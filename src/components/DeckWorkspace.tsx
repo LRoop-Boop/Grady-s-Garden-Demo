@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
-import type { LessonSlide, RequestStatus } from "./copilotData";
+import {
+  UI_STRINGS,
+  useT,
+  type LessonSlide,
+  type RequestStatus,
+} from "./copilotData";
 import { FlagToggleButton } from "./Flagsidebar";
+import ReportButton from "./ReportButton";
+import Tip from "./Tip";
+import PresenterView from "./PresenterView";
 
 // --- Central slide deck workspace --------------------------------------
 
@@ -29,43 +37,62 @@ export default function DeckWorkspace({
   isLabelFlagged: (label: string) => boolean;
   onToggleFlag: (label: string) => void;
 }>) {
+  const t = useT();
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [presenting, setPresenting] = useState(false);
 
   function exportToSlides() {
-    alert(
-      "Google Slides export isn't wired up yet — this deck is saved in the app for now."
-    );
+    alert(t(UI_STRINGS.exportAlert));
   }
 
   return (
     <section className="min-w-0 flex-1 px-6 py-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-bold text-teal-900">Lesson Deck</h2>
+        <h2 className="text-lg font-bold text-teal-900">
+          {t(UI_STRINGS.lessonDeck)}
+        </h2>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Tip text={UI_STRINGS.tipBlankSlide}>
           <button
             type="button"
             onClick={onAddTemplate}
             className="rounded-full border-2 border-teal-700 px-3 py-1.5 text-xs font-bold text-teal-700 transition hover:bg-teal-50"
           >
-            + Blank Slide
+            {t(UI_STRINGS.blankSlide)}
           </button>
+          </Tip>
 
+          <Tip text={UI_STRINGS.tipGenerateSlide}>
           <button
             type="button"
             onClick={() => setGenerateOpen(true)}
             className="rounded-full border-2 border-teal-700 px-3 py-1.5 text-xs font-bold text-teal-700 transition hover:bg-teal-50"
           >
-            ✨ Generate Slide
+            {t(UI_STRINGS.generateSlide)}
           </button>
+          </Tip>
 
+          <Tip text={UI_STRINGS.tipExport} align="right">
           <button
             type="button"
             onClick={exportToSlides}
-            className="rounded-full border-2 border-teal-700 bg-teal-700 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-teal-800"
+            className="rounded-full border-2 border-teal-700 px-3 py-1.5 text-xs font-bold text-teal-700 transition hover:bg-teal-50"
           >
-            Export to Google Slides
+            {t(UI_STRINGS.exportSlides)}
           </button>
+          </Tip>
+
+          <Tip text={UI_STRINGS.tipPresent} align="right">
+          <button
+            type="button"
+            onClick={() => setPresenting(true)}
+            disabled={slides.length === 0}
+            className="rounded-full border-2 border-teal-700 bg-teal-700 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {t(UI_STRINGS.present)}
+          </button>
+          </Tip>
         </div>
       </div>
 
@@ -78,12 +105,44 @@ export default function DeckWorkspace({
         />
       )}
 
+      {presenting && slides.length > 0 && (
+        <PresenterView
+          slides={slides}
+          startIndex={Math.max(
+            0,
+            slides.findIndex((s) => s.id === activeSlide?.id)
+          )}
+          onClose={() => setPresenting(false)}
+        />
+      )}
+
       {slides.length === 0 ? (
         <div className="mt-3 flex min-h-72 items-center justify-center rounded-3xl border-2 border-dashed border-teal-700/20 bg-white/60 text-center">
-          <p className="max-w-xs text-sm text-teal-800/70">
-            No slides yet — add a blank one, generate from a topic above, or
-            pull in a search result to get started.
-          </p>
+          <div className="flex max-w-xl flex-col items-center gap-5 px-4 py-6">
+            <p className="text-sm font-bold text-teal-900">
+              {t(UI_STRINGS.emptyDeckTitle)}
+            </p>
+
+            <ol className="flex flex-col gap-4 text-left sm:flex-row sm:gap-6">
+              {[
+                [UI_STRINGS.step1, UI_STRINGS.step1Desc],
+                [UI_STRINGS.step2, UI_STRINGS.step2Desc],
+                [UI_STRINGS.step3, UI_STRINGS.step3Desc],
+              ].map(([title, desc], i) => (
+                <li key={title} className="flex flex-1 items-start gap-2.5">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-teal-700 text-xs font-bold text-white">
+                    {i + 1}
+                  </span>
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-xs font-bold text-teal-900">
+                      {t(title)}
+                    </span>
+                    <span className="text-xs text-teal-800/70">{t(desc)}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
         </div>
       ) : (
         <div className="mt-3 flex flex-col gap-3">
@@ -136,6 +195,7 @@ function GenerateSlideModal({
   status: RequestStatus;
   error: string | null;
 }>) {
+  const t = useT();
   const [topic, setTopic] = useState("");
 
   useEffect(() => {
@@ -173,10 +233,10 @@ function GenerateSlideModal({
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-base font-bold text-teal-900">
-              ✨ Generate a Slide
+              {t(UI_STRINGS.generateTitle)}
             </h3>
             <p className="mt-0.5 text-xs text-teal-900/60">
-              Built from the Grady's Garden curriculum.
+              {t(UI_STRINGS.generateSubtitle)}
             </p>
           </div>
 
@@ -201,7 +261,7 @@ function GenerateSlideModal({
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleGenerate()}
-              placeholder="Topic: e.g. Root Vegetables"
+              placeholder={t(UI_STRINGS.topicPlaceholder)}
               className="w-full rounded-full border-2 border-teal-700/20 bg-teal-50/60 py-2.5 pl-9 pr-3 text-sm text-teal-900 placeholder:text-teal-900/40 focus:border-teal-600 focus:outline-none"
             />
           </div>
@@ -212,7 +272,9 @@ function GenerateSlideModal({
             disabled={status === "loading" || !topic.trim()}
             className="shrink-0 rounded-full border-2 border-teal-700 bg-teal-700 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {status === "loading" ? "Generating..." : "Generate"}
+            {status === "loading"
+              ? t(UI_STRINGS.generating)
+              : t(UI_STRINGS.generate)}
           </button>
         </div>
 
@@ -237,6 +299,8 @@ function SlideThumbnail({
   active: boolean;
   onClick: () => void;
 }>) {
+  const t = useT();
+
   return (
     <button
       type="button"
@@ -250,16 +314,17 @@ function SlideThumbnail({
       ].join(" ")}
     >
       <span className="line-clamp-1 text-[10px] font-bold text-teal-900">
-        {index + 1}. {slide.title || "Untitled"}
+        {index + 1}.{" "}
+        {slide.title ? t(slide.title) : t(UI_STRINGS.untitled)}
       </span>
 
       <span className="flex flex-col gap-0.5">
-        {slide.points.slice(0, 2).map((point, index) => (
+        {slide.points.slice(0, 2).map((point, pointIndex) => (
           <span
-            key={index}
+            key={pointIndex}
             className="line-clamp-1 text-[9px] text-teal-900/70"
           >
-            • {point || "..."}
+            • {point ? t(point) : "..."}
           </span>
         ))}
       </span>
@@ -268,25 +333,29 @@ function SlideThumbnail({
 }
 
 // --- Slide preview -----------------------------------------------------
+// Read-only, so this is where translated slide text is shown. The editor
+// below keeps the English source text.
 
 function SlidePreviewCard({ slide }: Readonly<{ slide: LessonSlide }>) {
+  const t = useT();
+
   return (
     <div className="flex aspect-video w-full flex-col overflow-hidden rounded-2xl border-2 border-teal-700/15 bg-white shadow-sm">
       <div
         className={["h-2 w-full bg-gradient-to-r", slide.accent].join(" ")}
       />
 
-      <div className="flex flex-1 gap-4 p-5">
+      <div className="flex min-h-0 flex-1 gap-4 p-5">
         <div className="flex flex-1 flex-col gap-2">
           <h3 className="text-lg font-bold text-teal-900">
-            {slide.title || "Untitled slide"}
+            {slide.title ? t(slide.title) : t(UI_STRINGS.untitledSlide)}
           </h3>
 
           <ul className="flex flex-col gap-1 text-sm text-teal-800">
             {slide.points.filter(Boolean).map((point, index) => (
               <li key={index} className="flex gap-1.5">
                 <span className="text-teal-500">•</span>
-                <span>{point}</span>
+                <span>{t(point)}</span>
               </li>
             ))}
           </ul>
@@ -294,16 +363,16 @@ function SlidePreviewCard({ slide }: Readonly<{ slide: LessonSlide }>) {
 
         {slide.layout === "bullets-image" && (
           // Widened from w-1/3 to w-2/5 so the image reads more clearly.
-          <div className="flex w-2/5 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-50">
+          <div className="relative flex w-2/5 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-50">
             {slide.imageUrl ? (
               <img
                 src={slide.imageUrl}
                 alt=""
-                className="h-full w-full object-cover"
+                className="absolute inset-0 h-full w-full object-cover"
               />
             ) : (
               <span className="px-2 text-center text-xs text-teal-700/50">
-                No image yet
+                {t(UI_STRINGS.noImage)}
               </span>
             )}
           </div>
@@ -314,6 +383,9 @@ function SlidePreviewCard({ slide }: Readonly<{ slide: LessonSlide }>) {
 }
 
 // --- Slide editor ------------------------------------------------------
+// Fields show the translated text. Whatever the teacher types is saved as-is
+// (see handleSlideEdit in Copilot.tsx), so edited text stays in the language
+// it was typed in rather than being round-tripped through translation.
 
 function SlideEditorPanel({
   slide,
@@ -328,14 +400,16 @@ function SlideEditorPanel({
   isFlagged: boolean;
   onToggleFlag: () => void;
 }>) {
+  const t = useT();
+
   return (
     <div className="flex flex-col gap-2.5 rounded-2xl border-2 border-teal-700/15 bg-white p-4">
       <div className="flex items-center gap-2">
         <input
-          value={slide.title}
+          value={t(slide.title)}
           onChange={(e) => onUpdate({ title: e.target.value })}
           className="w-full rounded-xl border-2 border-teal-700/20 px-3 py-1.5 text-sm font-bold text-teal-900"
-          placeholder="Slide title"
+          placeholder={t(UI_STRINGS.slideTitlePlaceholder)}
         />
 
         <FlagToggleButton flagged={isFlagged} onToggle={onToggleFlag} />
@@ -345,7 +419,7 @@ function SlideEditorPanel({
         {slide.points.map((point, index) => (
           <div key={index} className="flex items-center gap-2">
             <input
-              value={point}
+              value={t(point)}
               onChange={(e) => {
                 const next = [...slide.points];
                 next[index] = e.target.value;
@@ -364,7 +438,7 @@ function SlideEditorPanel({
                 })
               }
               className="text-teal-700/50 hover:text-rose-600"
-              aria-label="Remove point"
+              aria-label={t(UI_STRINGS.removePoint)}
             >
               ✕
             </button>
@@ -376,7 +450,7 @@ function SlideEditorPanel({
           onClick={() => onUpdate({ points: [...slide.points, ""] })}
           className="self-start text-xs font-semibold text-teal-700 hover:underline"
         >
-          + Add point
+          {t(UI_STRINGS.addPoint)}
         </button>
       </div>
 
@@ -391,7 +465,7 @@ function SlideEditorPanel({
               : "text-teal-700/60",
           ].join(" ")}
         >
-          Bullets
+          {t(UI_STRINGS.layoutBullets)}
         </button>
 
         <button
@@ -404,7 +478,7 @@ function SlideEditorPanel({
               : "text-teal-700/60",
           ].join(" ")}
         >
-          Bullets + Image
+          {t(UI_STRINGS.layoutBulletsImage)}
         </button>
       </div>
 
@@ -412,7 +486,7 @@ function SlideEditorPanel({
         <input
           value={slide.imageUrl}
           onChange={(e) => onUpdate({ imageUrl: e.target.value })}
-          placeholder="Image URL..."
+          placeholder={t(UI_STRINGS.imageUrlPlaceholder)}
           className="w-full rounded-xl border-2 border-teal-700/10 px-3 py-1.5 text-sm text-teal-900"
         />
       )}
@@ -422,8 +496,20 @@ function SlideEditorPanel({
         onClick={onRemove}
         className="self-start text-xs font-medium text-rose-600 hover:underline"
       >
-        Remove slide
+        {t(UI_STRINGS.removeSlide)}
       </button>
+
+      {slide.source && (
+        <ReportButton
+          key={slide.id}
+          kind="slide"
+          content={{
+            title: slide.title,
+            points: slide.points,
+            source: slide.source,
+          }}
+        />
+      )}
     </div>
   );
 }

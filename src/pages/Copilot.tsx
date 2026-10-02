@@ -14,6 +14,9 @@ import {
 
 import {
   FLAGS_STORAGE_KEY,
+  UI_STRINGS,
+  TRANSLATION_CACHE_KEY,
+  TranslateContext,
   makeTemplateSlide,
   slideFromSearchResult,
   type FlaggedTopic,
@@ -22,26 +25,11 @@ import {
 } from "../components/copilotData";
 import DeckWorkspace from "../components/DeckWorkspace";
 import Sidebar, { FlagToggleButton } from "../components/Flagsidebar";
+import ReportButton from "../components/ReportButton";
+import Tip from "../components/Tip";
 
-// --- Static UI strings ---------------------------------------------------
-// Centralized so the translation toggle can batch-translate them in one shot
-// instead of scattering translateTexts calls through the JSX.
-
-const UI_STRINGS = {
-  pageEyebrow: "Grady's Garden · Veggie Adventure",
-  pageTitle: "Parent/Teacher Copilot",
-  searchPlaceholder: "Search: e.g. Can carrots be purple?",
-  searchButtonIdle: "Look Up",
-  searchButtonLoading: "Looking up...",
-  searchHelper:
-    "Answers come from the Grady's Garden curriculum when available; otherwise they're labeled AI-generated.",
-  loadingCurriculum: "Checking the curriculum...",
-  addToSlide: "+ Add to Slide",
-  lastGeneratedLabel: "Last generated slide:",
-  foundInLabel: "Found in:",
-  fromCurriculumBadge: "📚 From curriculum (Firestore)",
-  aiGeneratedBadge: "✨ AI-generated",
-} as const;
+// UI_STRINGS now lives in copilotData.ts so child components can import the
+// keys too. They're batch-translated by the effect below.
 
 export default function Copilot() {
   // --- Saved topics ----------------------------------------------------
@@ -169,6 +157,9 @@ export default function Copilot() {
 
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<CurriculumSearchResult | null>(null);
+  // The query that produced `result`, so reports aren't affected by whatever
+  // the user has typed into the search box since.
+  const [resultQuery, setResultQuery] = useState("");
   const [searchStatus, setSearchStatus] = useState<RequestStatus>("idle");
   const [searchError, setSearchError] = useState<string | null>(null);
 
@@ -181,6 +172,7 @@ export default function Copilot() {
     try {
       const found = await searchCurriculum(query.trim());
       setResult(found);
+      setResultQuery(query.trim());
       setSearchStatus("idle");
     } catch (err) {
       setSearchStatus("error");
@@ -219,14 +211,32 @@ export default function Copilot() {
   // --- Translation -------------------------------------------------------
   // Single toggle (EN <-> ES) using the translate.ts provider. Translated
   // strings are cached by their English source so repeat toggles don't
-  // re-hit MyMemory. Covers the static UI copy plus the RAG-driven content
-  // (fact of the day, search result panel). Slide text rendered inside
-  // DeckWorkspace isn't translated here since that component's source
-  // wasn't part of this pass — it'd need its own translate() calls to
-  // pick up the cache.
+  // re-hit MyMemory. `translate` is shared with all children through
+  // TranslateContext (see useT in copilotData.ts), so DeckWorkspace and
+  // Sidebar don't need it as a prop.
+  //
+  // Slide text is translated for display only (thumbnails + preview). The
+  // editor keeps the English source text so edits don't write translated
+  // text back into the slide data.
 
   const [language, setLanguage] = useState<LanguageCode>("en");
-  const [translationCache, setTranslationCache] = useState<Record<string, string>>({});
+  const [translationCache, setTranslationCache] = useState<Record<string, string>>(
+    () => {
+      try {
+        return JSON.parse(localStorage.getItem(TRANSLATION_CACHE_KEY) ?? "{}");
+      } catch {
+        return {};
+      }
+    }
+  );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TRANSLATION_CACHE_KEY, JSON.stringify(translationCache));
+    } catch {
+      // storage full or unavailable; the cache just won't persist
+    }
+  }, [translationCache]);
   const [translating, setTranslating] = useState(false);
   const [translationError, setTranslationError] = useState<string | null>(null);
 
@@ -264,6 +274,7 @@ export default function Copilot() {
     }
   }
 
+  // Static UI copy, fact, and search result: translate immediately.
   useEffect(() => {
     if (language === "en") return;
 
@@ -278,125 +289,167 @@ export default function Copilot() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language, fact, result]);
 
+  // Slides: debounced so typing in the editor doesn't fire a request per
+  // keystroke.
+  useEffect(() => {
+    if (language === "en" || slides.length === 0) return;
+
+    const timer = setTimeout(() => {
+      ensureTranslated(slides.flatMap((s) => [s.title, ...s.points]));
+    }, 600);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language, slides]);
+
+  // Editing while translated: the editor shows translated text, so whatever
+  // the teacher types counts as authored text. We seed the cache with identity
+  // entries so it isn't sent back through MyMemory. Edited text therefore
+  // stays in the language it was typed in.
+  function handleSlideEdit(id: string, patch: Partial<LessonSlide>) {
+    updateSlide(id, patch);
+    if (language === "en") return;
+
+    const current = slides.find((s) => s.id === id);
+    const before = new Set([current?.title, ...(current?.points ?? [])]);
+    const authored = [patch.title, ...(patch.points ?? [])].filter(
+      (s): s is string => !!s && s.trim() !== "" && !before.has(s)
+    );
+    if (authored.length === 0) return;
+
+    setTranslationCache((prev) => {
+      const next = { ...prev };
+      authored.forEach((s) => {
+        next[s] = s;
+      });
+      return next;
+    });
+  }
+
   function toggleLanguage() {
     setLanguage((prev) => (prev === "en" ? "es" : "en"));
   }
 
   return (
-    <div className="min-h-screen w-full overflow-x-hidden bg-gradient-to-b from-teal-50 to-white">
-      <header className="flex items-center justify-between bg-teal-800 px-6 py-4 text-white shadow-md">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-teal-200">
-            {translate(UI_STRINGS.pageEyebrow)}
-          </p>
-          <h1 className="text-xl font-bold sm:text-2xl">
-            {translate(UI_STRINGS.pageTitle)}
-          </h1>
-        </div>
+    <TranslateContext.Provider value={translate}>
+      <div className="min-h-screen w-full overflow-x-hidden bg-gradient-to-b from-teal-50 to-white">
+        <header className="flex items-center justify-between bg-teal-800 px-6 py-4 text-white shadow-md">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-teal-200">
+              {translate(UI_STRINGS.pageEyebrow)}
+            </p>
+            <h1 className="text-xl font-bold sm:text-2xl">
+              {translate(UI_STRINGS.pageTitle)}
+            </h1>
+          </div>
 
-        <div className="flex flex-col items-end gap-1">
-          <button
-            type="button"
-            onClick={toggleLanguage}
-            disabled={translating}
-            className="rounded-full border-2 border-white/30 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {translating ? "…" : language === "en" ? "ES" : "EN"}
-          </button>
-          {translationError && (
-            <span className="max-w-[10rem] text-right text-[10px] text-rose-200">
-              {translationError}
-            </span>
-          )}
-        </div>
-      </header>
-
-      <div className="border-b-2 border-teal-700/10 bg-white px-6 py-4">
-        <SmartSearchBar
-          query={query}
-          onQueryChange={setQuery}
-          onSearch={runSearch}
-          status={searchStatus}
-          translate={translate}
-        />
-
-        {(result || searchStatus === "loading" || searchStatus === "error") && (
-          <LookupResultPanel
-            result={result}
-            status={searchStatus}
-            error={searchError}
-            isFlagged={result ? isLabelFlagged(result.title) : false}
-            onToggleFlag={() => result && toggleQuickFlag(result.title)}
-            onAddToSlide={() => {
-              if (result) {
-                addSlide(
-                  slideFromSearchResult(result, "from-orange-100 to-amber-50")
-                );
-              }
-            }}
-            onDismiss={() => {
-              setResult(null);
-              setSearchStatus("idle");
-            }}
-            translate={translate}
-          />
-        )}
-      </div>
-
-      {lastGenerated && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-teal-700/10 bg-white px-6 py-2 text-xs text-teal-900/70">
-          <span>{translate(UI_STRINGS.lastGeneratedLabel)}</span>
-          <SourceBadge source={lastGenerated.source} translate={translate} />
-          {lastGenerated.source === "curriculum" &&
-            lastGenerated.sourceTitles.length > 0 && (
-              <span>
-                {translate(UI_STRINGS.foundInLabel)}{" "}
-                {lastGenerated.sourceTitles.join(" · ")}
+          <div className="flex flex-col items-end gap-1">
+            <Tip text={UI_STRINGS.tipLanguage} align="right">
+            <button
+              type="button"
+              onClick={toggleLanguage}
+              disabled={translating}
+              className="rounded-full border-2 border-white/30 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {translating ? "…" : language === "en" ? "🌐 Español" : "🌐 English"}
+            </button>
+            </Tip>
+            {translationError && (
+              <span className="max-w-[10rem] text-right text-[10px] text-rose-200">
+                {translationError}
               </span>
             )}
+          </div>
+        </header>
+
+        <div className="border-b-2 border-teal-700/10 bg-white px-6 py-4">
+          <SmartSearchBar
+            query={query}
+            onQueryChange={setQuery}
+            onSearch={runSearch}
+            status={searchStatus}
+            translate={translate}
+          />
+
+          {(result || searchStatus === "loading" || searchStatus === "error") && (
+            <LookupResultPanel
+              result={result}
+              query={resultQuery}
+              status={searchStatus}
+              error={searchError}
+              isFlagged={result ? isLabelFlagged(result.title) : false}
+              onToggleFlag={() => result && toggleQuickFlag(result.title)}
+              onAddToSlide={() => {
+                if (result) {
+                  addSlide(
+                    slideFromSearchResult(result, "from-orange-100 to-amber-50")
+                  );
+                }
+              }}
+              onDismiss={() => {
+                setResult(null);
+                setSearchStatus("idle");
+              }}
+              translate={translate}
+            />
+          )}
         </div>
-      )}
 
-      <main className="flex min-h-0 flex-col lg:flex-row">
-        <DeckWorkspace
-          slides={slides}
-          activeSlide={activeSlide}
-          onSelect={setActiveSlideId}
-          onAddTemplate={() => addSlide(makeTemplateSlide())}
-          onGenerate={generateSlideFromTopic}
-          generateStatus={generateStatus}
-          generateError={generateError}
-          onUpdateSlide={updateSlide}
-          onRemoveSlide={removeSlide}
-          isLabelFlagged={isLabelFlagged}
-          onToggleFlag={toggleQuickFlag}
-        />
+        {lastGenerated && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-teal-700/10 bg-white px-6 py-2 text-xs text-teal-900/70">
+            <span>{translate(UI_STRINGS.lastGeneratedLabel)}</span>
+            <SourceBadge source={lastGenerated.source} translate={translate} />
+            {lastGenerated.source === "curriculum" &&
+              lastGenerated.sourceTitles.length > 0 && (
+                <span>
+                  {translate(UI_STRINGS.foundInLabel)}{" "}
+                  {lastGenerated.sourceTitles.join(" · ")}
+                </span>
+              )}
+          </div>
+        )}
 
-        <Sidebar
-          fact={
-            factStatus === "loading"
-              ? "Loading today's fact…"
-              : factStatus === "error"
-              ? factError ?? "Couldn't load a fact right now."
-              : fact
-              ? translate(fact.text)
-              : ""
-          }
-          onRefreshFact={refreshFact}
-          onAddFactToSlide={addFactSlide}
-          flags={flags}
-          onAdd={(flag) => persistFlags([...flags, flag])}
-          onUpdate={(id, patch) =>
-            persistFlags(
-              flags.map((flag) =>
-                flag.id === id ? { ...flag, ...patch } : flag
+        <main className="flex min-h-0 flex-col lg:flex-row">
+          <DeckWorkspace
+            slides={slides}
+            activeSlide={activeSlide}
+            onSelect={setActiveSlideId}
+            onAddTemplate={() => addSlide(makeTemplateSlide())}
+            onGenerate={generateSlideFromTopic}
+            generateStatus={generateStatus}
+            generateError={generateError}
+            onUpdateSlide={handleSlideEdit}
+            onRemoveSlide={removeSlide}
+            isLabelFlagged={isLabelFlagged}
+            onToggleFlag={toggleQuickFlag}
+          />
+
+          <Sidebar
+            fact={
+              factStatus === "loading"
+                ? translate(UI_STRINGS.loadingFact)
+                : factStatus === "error"
+                ? factError ?? translate(UI_STRINGS.factFallbackError)
+                : fact
+                ? translate(fact.text)
+                : ""
+            }
+            onRefreshFact={refreshFact}
+            onAddFactToSlide={addFactSlide}
+            flags={flags}
+            onAdd={(flag) => persistFlags([...flags, flag])}
+            onUpdate={(id, patch) =>
+              persistFlags(
+                flags.map((flag) =>
+                  flag.id === id ? { ...flag, ...patch } : flag
+                )
               )
-            )
-          }
-          onRemove={(id) => persistFlags(flags.filter((flag) => flag.id !== id))}
-        />
-      </main>
-    </div>
+            }
+            onRemove={(id) => persistFlags(flags.filter((flag) => flag.id !== id))}
+          />
+        </main>
+      </div>
+    </TranslateContext.Provider>
   );
 }
 
@@ -418,6 +471,10 @@ function SourceBadge({
   const fromCurriculum = source === "curriculum";
 
   return (
+    <Tip
+      text={fromCurriculum ? UI_STRINGS.tipBadgeCurriculum : UI_STRINGS.tipBadgeAi}
+      align="left"
+    >
     <span
       className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
         fromCurriculum
@@ -429,6 +486,7 @@ function SourceBadge({
         ? translate(UI_STRINGS.fromCurriculumBadge)
         : translate(UI_STRINGS.aiGeneratedBadge)}
     </span>
+    </Tip>
   );
 }
 
@@ -464,6 +522,7 @@ function SmartSearchBar({
           />
         </div>
 
+        <Tip text={UI_STRINGS.tipSearch} align="right" className="shrink-0">
         <button
           type="button"
           onClick={onSearch}
@@ -474,6 +533,7 @@ function SmartSearchBar({
             ? translate(UI_STRINGS.searchButtonLoading)
             : translate(UI_STRINGS.searchButtonIdle)}
         </button>
+        </Tip>
       </div>
 
       <p className="pl-1 text-xs text-teal-900/50">
@@ -487,6 +547,7 @@ function SmartSearchBar({
 
 function LookupResultPanel({
   result,
+  query,
   status,
   error,
   isFlagged,
@@ -496,6 +557,7 @@ function LookupResultPanel({
   translate,
 }: Readonly<{
   result: CurriculumSearchResult | null;
+  query: string;
   status: RequestStatus;
   error: string | null;
   isFlagged: boolean;
@@ -567,6 +629,7 @@ function LookupResultPanel({
             </ul>
           )}
 
+          <Tip text={UI_STRINGS.tipAddToSlide} className="self-start">
           <button
             type="button"
             onClick={onAddToSlide}
@@ -574,6 +637,15 @@ function LookupResultPanel({
           >
             {translate(UI_STRINGS.addToSlide)}
           </button>
+          </Tip>
+
+          {/* Snapshot is the English original, never the translated text. */}
+          <ReportButton
+            key={result.teacherSummary}
+            kind="search-result"
+            query={query}
+            content={result}
+          />
         </div>
       )}
     </div>

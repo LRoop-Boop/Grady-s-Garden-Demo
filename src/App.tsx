@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Home from "./pages/Home";
 import Translation from "./pages/Translation";
 import Copilot from "./pages/Copilot";
+import ParentCopilot from "./pages/ParentCopilot";
 import StudentPractice from "./pages/StudentPractice";
 import PersonalizedLessons from "./pages/PersonalizedLessons";
 
@@ -12,6 +13,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/translation" element={<Translation />} />
         <Route path="/copilot" element={<Copilot />} />
+        <Route path="/parentcopilot" element={<ParentCopilot />} />
         <Route path="/lessons/:studentId/practice" element={<StudentPractice />} />
         <Route path="/lessons" element={<PersonalizedLessons />} />
       </Routes>

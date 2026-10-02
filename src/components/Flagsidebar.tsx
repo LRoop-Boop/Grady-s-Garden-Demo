@@ -1,5 +1,11 @@
 import { useState, type ReactNode } from "react";
-import type { FlagType, FlaggedTopic } from "./copilotData";
+import Tip from "./Tip";
+import {
+  UI_STRINGS,
+  useT,
+  type FlagType,
+  type FlaggedTopic,
+} from "./copilotData";
 
 // --- Icons ---------------------------------------------------------------
 
@@ -82,7 +88,10 @@ export function FlagToggleButton({
   onToggle: () => void;
   size?: "sm" | "md";
 }>) {
+  const t = useT();
+
   return (
+    <Tip text={UI_STRINGS.tipSave} align={size === "sm" ? "left" : "right"}>
     <button
       type="button"
       onClick={onToggle}
@@ -97,8 +106,9 @@ export function FlagToggleButton({
       ].join(" ")}
     >
       <BookmarkIcon filled={flagged} />
-      {flagged ? "Saved" : "Save"}
+      {flagged ? t(UI_STRINGS.saved) : t(UI_STRINGS.save)}
     </button>
+    </Tip>
   );
 }
 
@@ -185,6 +195,7 @@ function Modal({
 // "list" shows the existing saved topics; "add" is a short deliberate form
 // so adding a topic from scratch (not from a slide/search result) feels
 // like an intentional action rather than a stray text field.
+// NOTE: the strings inside this modal are still English-only.
 
 function SavedTopicsModalBody({
   flags,
@@ -337,21 +348,25 @@ function FactTile({
   onRefresh,
   onAddToSlide,
 }: Readonly<{ fact: string; onRefresh: () => void; onAddToSlide: () => void }>) {
+  const t = useT();
+
   return (
     <div className="flex aspect-square flex-col justify-between rounded-2xl border-2 border-teal-700/10 bg-gradient-to-br from-teal-700 to-emerald-600 p-3 text-white shadow-sm">
       <div className="flex items-start justify-between gap-1">
         <span className="text-xs font-bold uppercase leading-tight tracking-wide text-teal-100">
-          🌱 Fact of the Day
+          {t(UI_STRINGS.factOfTheDay)}
         </span>
 
+        <Tip text={UI_STRINGS.showDifferentFact} align="right">
         <button
           type="button"
           onClick={onRefresh}
-          aria-label="Show a different fact"
+          aria-label={t(UI_STRINGS.showDifferentFact)}
           className="shrink-0 rounded-full p-1 transition hover:bg-white/15"
         >
           <RefreshIcon />
         </button>
+        </Tip>
       </div>
 
       <p className="line-clamp-4 text-sm font-medium leading-snug">{fact}</p>
@@ -361,7 +376,7 @@ function FactTile({
         onClick={onAddToSlide}
         className="self-start rounded-full border-2 border-white/40 px-2.5 py-1 text-xs font-bold transition hover:bg-white/10"
       >
-        + Add to Slide
+        {t(UI_STRINGS.addToSlide)}
       </button>
     </div>
   );
@@ -378,6 +393,7 @@ function FlagsTile({
   onOpenList: () => void;
   onOpenAdd: () => void;
 }>) {
+  const t = useT();
   const preview = [...flags].reverse().slice(0, 3);
 
   return (
@@ -385,7 +401,7 @@ function FlagsTile({
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-teal-700">
           <BookmarkIcon filled />
-          Saved Topics
+          {t(UI_STRINGS.savedTopics)}
         </span>
 
         <button
@@ -404,9 +420,7 @@ function FlagsTile({
         className="flex flex-1 flex-col justify-center gap-1.5 text-left"
       >
         {flags.length === 0 ? (
-          <p className="text-sm text-teal-900/50">
-            Nothing saved yet — tap <span className="font-bold text-teal-700">+</span> to add one.
-          </p>
+          <p className="text-sm text-teal-900/50">{t(UI_STRINGS.nothingSaved)}</p>
         ) : (
           <>
             <span className="text-3xl font-bold leading-none text-teal-900">
@@ -436,7 +450,7 @@ function FlagsTile({
         onClick={onOpenList}
         className="self-start text-xs font-bold text-teal-700 transition hover:underline"
       >
-        View all →
+        {t(UI_STRINGS.viewAll)}
       </button>
     </div>
   );
@@ -461,6 +475,7 @@ export default function Sidebar({
   onUpdate: (id: string, patch: Partial<FlaggedTopic>) => void;
   onRemove: (id: string) => void;
 }>) {
+  const t = useT();
   const [modalView, setModalView] = useState<"list" | "add" | null>(null);
 
   return (
@@ -475,7 +490,7 @@ export default function Sidebar({
       </div>
 
       {modalView && (
-        <Modal title="Saved Topics" onClose={() => setModalView(null)}>
+        <Modal title={t(UI_STRINGS.savedTopics)} onClose={() => setModalView(null)}>
           <SavedTopicsModalBody
             flags={flags}
             initialView={modalView}

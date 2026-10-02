@@ -274,3 +274,182 @@ export async function getFactOfTheDay(
         return { text: doc.content, source: doc.title };
     }
 }
+
+// --- Parent copilot: home activities ---------------------------------------
+// Same RAG flow as searchCurriculum, but the output is aimed at a parent:
+// what the child is learning, one activity to do at home, conversation
+// starters, and an optional nutrition tie-in.
+
+export interface HomeActivityResult {
+    title: string;
+    learningBlurb: string;
+    activity: {
+        name: string;
+        time: string;
+        materials: string[];
+        steps: string[];
+    };
+    conversationStarters: string[];
+    /** Empty string when a nutrition tie-in doesn't fit the topic */
+    nutritionTip: string;
+    source: "curriculum" | "ai";
+    sourceTitles: string[];
+}
+
+function buildParentPrompt(query: string, hits: CurriculumDoc[]): string {
+    const grounding =
+        hits.length > 0
+            ? [
+                  "Facts about fruits and vegetables must come ONLY from the curriculum",
+                  "excerpt below (the activity itself can be your own idea, but don't add",
+                  "new facts). If the excerpt does not actually relate to the topic, ignore",
+                  'it, use general knowledge, and set "usedCurriculum" to false.',
+                  "",
+                  "CURRICULUM EXCERPT:",
+                  ...hits.map(
+                      (d, i) =>
+                          `[${i + 1}] ${d.title} (${d.subject}, grades ${d.gradeLevel}): ${d.content}`
+                  ),
+              ]
+            : [
+                  "No curriculum excerpt matched this topic. Use general knowledge",
+                  'and set "usedCurriculum" to false.',
+              ];
+
+    return [
+        "You are helping a busy parent bring their K-6 child's fruits-and-vegetables",
+        "learning into the home. Given the topic or question below, respond with ONLY",
+        "valid JSON (no markdown fences, no extra text) in exactly this shape:",
+        '{"title": "...", "learningBlurb": "...", "activity": {"name": "...", "time": "...", "materials": ["..."], "steps": ["..."]}, "conversationStarters": ["..."], "nutritionTip": "...", "usedCurriculum": true}',
+        "",
+        "- title: short topic title, under 8 words.",
+        "- learningBlurb: 1-2 sentences on what the child is learning, plain language, no jargon.",
+        '- activity: ONE simple home activity. "time" like "15 minutes". 2-5 common household',
+        "  materials, 3-5 short steps. No special equipment. Mention adult supervision if",
+        "  knives or heat are involved.",
+        "- conversationStarters: 2-3 open-ended questions to ask at dinner or in the car.",
+        "- nutritionTip: ONE sentence connecting the topic to eating or trying the food",
+        "  at home. Use an empty string if it doesn't fit naturally.",
+        "- usedCurriculum: true only if your answer is based on the curriculum excerpt.",
+        "",
+        ...grounding,
+        "",
+        `Topic: "${query}"`,
+    ].join("\n");
+}
+
+function stringList(v: unknown): string[] {
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+export async function searchHomeActivities(query: string): Promise<HomeActivityResult> {
+    if (!apiKey) {
+        throw new CurriculumSearchError(
+            "Missing VITE_GEMINI_API_KEY. Add it to a .env file to enable search."
+        );
+    }
+
+    let hits: CurriculumDoc[] = [];
+    try {
+        hits = retrieve(query, await loadCurriculum()).slice(0, 1);
+    } catch (err) {
+        console.warn("Curriculum lookup failed, falling back to AI only", err);
+    }
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+        model: "gemini-3.5-flash-lite",
+        generationConfig: { responseMimeType: "application/json" },
+    });
+
+    let rawText: string;
+    try {
+        const result = await model.generateContent(buildParentPrompt(query, hits));
+        rawText = result.response.text();
+    } catch (err) {
+        throw new CurriculumSearchError(
+            err instanceof Error ? err.message : "Activity search failed."
+        );
+    }
+
+    try {
+        const cleaned = rawText.trim().replace(/^```json\s*|^```\s*|```$/g, "").trim();
+        const p = JSON.parse(cleaned);
+
+        if (
+            typeof p.title === "string" &&
+            typeof p.learningBlurb === "string" &&
+            typeof p.activity?.name === "string"
+        ) {
+            const fromCurriculum = hits.length > 0 && p.usedCurriculum === true;
+            return {
+                title: p.title,
+                learningBlurb: p.learningBlurb,
+                activity: {
+                    name: p.activity.name,
+                    time: typeof p.activity.time === "string" ? p.activity.time : "",
+                    materials: stringList(p.activity.materials),
+                    steps: stringList(p.activity.steps),
+                },
+                conversationStarters: stringList(p.conversationStarters),
+                nutritionTip: typeof p.nutritionTip === "string" ? p.nutritionTip : "",
+                source: fromCurriculum ? "curriculum" : "ai",
+                sourceTitles: fromCurriculum ? hits.map((h) => h.title) : [],
+            };
+        }
+    } catch {
+        // fall through to the error below
+    }
+
+    throw new CurriculumSearchError("Couldn't read that response. Try again.");
+}
+
+// --- Parent tip of the day ---------------------------------------------------
+// Same pick-a-doc logic as getFactOfTheDay, different prompt.
+
+export async function getParentTip(
+    mode: "daily" | "random" = "daily",
+    excludeTitle?: string
+): Promise<FactOfTheDay> {
+    let docs: CurriculumDoc[];
+    try {
+        docs = await loadCurriculum();
+    } catch (err) {
+        throw new CurriculumSearchError(
+            err instanceof Error ? err.message : "Could not load curriculum."
+        );
+    }
+    if (docs.length === 0) throw new CurriculumSearchError("No curriculum docs available.");
+
+    let pool = docs;
+    if (mode === "random" && excludeTitle && docs.length > 1) {
+        pool = docs.filter((d) => d.title !== excludeTitle);
+    }
+
+    const index =
+        mode === "daily"
+            ? Math.floor(Date.now() / (1000 * 60 * 60 * 24)) % pool.length
+            : Math.floor(Math.random() * pool.length);
+    const doc = pool[index];
+
+    if (!apiKey) return { text: doc.content, source: doc.title };
+
+    try {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+        const prompt = [
+            "Turn the curriculum excerpt below into ONE practical tip for a parent to",
+            "bring this learning home (a question to ask, or a tiny activity at the",
+            "dinner table). One or two sentences, under 40 words, no preamble, no quotes,",
+            "no markdown.",
+            "",
+            `Excerpt (${doc.title}): ${doc.content}`,
+        ].join("\n");
+
+        const result = await model.generateContent(prompt);
+        const text = result.response.text().trim();
+        return { text: text || doc.content, source: doc.title };
+    } catch {
+        return { text: doc.content, source: doc.title };
+    }
+}
